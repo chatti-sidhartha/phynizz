@@ -1,70 +1,175 @@
-# phynizz
+# Essential Pipeline - Body Analysis System
 
-Part C implementation (Virtual Try-On) is now available as a hackathon MVP.
+Complete standalone system for body measurements, 3D DensePose visualization, and 3D mesh generation.
 
-## What is implemented
+## Folder Structure
 
-- Mesh-based garment draping using local triangle warping for better shoulder and torso curvature.
-- HMR2.0 landmarks support (optional) with MediaPipe fallback.
-- Garment foreground extraction (alpha channel or white-background removal).
-- Alpha blending with fallback preview mode when pose confidence is low.
-- FastAPI endpoint for integration and a CLI demo runner.
-
-## Setup
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+```
+essential_pipeline/
+├── generate_densepose_iuv.py      # 3D DensePose segmentation (24-part heat-map)
+├── generate_3d_mesh.py             # 3D mesh generation (Python + OBJ export)
+├── smpl_process_image_lite.py      # 2D measurements extraction
+├── models/                         # Pre-trained models
+│   ├── multiHMR_672_L.pt          # HMR model (1.2GB)
+│   └── smpl_models/
+│       ├── basicmodel_m_lbs_10_207_0_v1.1.0.pkl
+│       └── basicmodel_f_lbs_10_207_0_v1.1.0.pkl
+├── modules/                        # Core system modules
+│   ├── hmr_estimator.py           # HMR neural network inference
+│   ├── smpl_utils.py              # SMPL body model management
+│   └── direct_measurement.py      # Measurement extraction engine
+├── test_images/                    # Sample test images
+├── output/                         # Generated outputs
+└── requirements_a.txt              # Python dependencies
 ```
 
-## Run API (Part C service)
+## Quick Start
 
+### Setup (One-time):
 ```bash
-uvicorn app:app --reload --host 0.0.0.0 --port 8000
+# Navigate to this folder
+cd essential_pipeline
+
+# Install dependencies
+pip install -r requirements_a.txt
 ```
 
-Health check:
+### Usage
 
+#### 1. Get Body Measurements (2D Skeleton + Text)
 ```bash
-curl http://localhost:8000/health
+python smpl_process_image_lite.py test_images/full_body.jpg
+```
+**Output:**
+- `output/annotated_full_body.jpg` - Image with pose skeleton
+- `output/measurements_full_body.txt` - Body measurements (CM + INCHES)
+
+#### 2. Generate 3D DensePose (Heat-map Segmentation)
+```bash
+python generate_densepose_iuv.py test_images/full_body.jpg
+```
+**Output:**
+- `output/densepose_iuv_full_body.png` - 24-part colored segmentation
+
+#### 3. Generate 3D Mesh (Solid Model + OBJ)
+```bash
+python generate_3d_mesh.py test_images/full_body.jpg
+```
+**Output:**
+- `output/mesh_3d_full_body.png` - Multi-view 3D visualization
+- `output/mesh_3d_full_body.obj` - Wavefront OBJ (import into Blender/MeshLab)
+
+#### 4. Run All Together
+```bash
+python smpl_process_image_lite.py test_images/full_body.jpg && \
+python generate_densepose_iuv.py test_images/full_body.jpg && \
+python generate_3d_mesh.py test_images/full_body.jpg
 ```
 
-Try-on endpoint (multipart form):
+## Output Files
+
+| File | Purpose |
+|------|---------|
+| `annotated_*.jpg` | 2D image with pose skeleton overlay |
+| `measurements_*.txt` | Body measurements table (CM, INCHES) |
+| `densepose_iuv_*.png` | 24-part colored body segmentation |
+| `mesh_3d_*.png` | 3D solid mesh (3 views: Front/Side/3D) |
+| `mesh_3d_*.obj` | 3D model for Blender/3D software |
+
+## Measurements Extracted
+
+- Height (cm)
+- Shoulder width (cm)
+- Chest circumference (cm)
+- Waist circumference (cm)
+- Hip circumference (cm)
+- Arm length (cm)
+- Leg length (cm)
+- Inseam (cm)
+- Torso length (cm)
+- Neck circumference (cm)
+
+All measurements provided in **both CM and INCHES**.
+
+## Device Options
 
 ```bash
-curl -X POST http://localhost:8000/part-c/try-on \
-	-F "user_image=@samples/user.jpg" \
-	-F "garment_image=@samples/garment.png" \
-	-F "category=top" \
-	-F "scale_adjust=1.0" \
-	-F "y_offset=0" \
-	-F 'hmr_landmarks_json={"left_shoulder":[0.36,0.24],"right_shoulder":[0.61,0.24],"left_hip":[0.42,0.49],"right_hip":[0.56,0.49],"score":0.94}'
+# GPU (CUDA)
+python smpl_process_image_lite.py test_images/full_body.jpg --device cuda
+
+# CPU (slower)
+python smpl_process_image_lite.py test_images/full_body.jpg --device cpu
 ```
 
-The output image is saved to `outputs/part_c_result.jpg`.
+## Dependencies
 
-## Run local demo script
+See `requirements_a.txt` for full list. Key packages:
+- `torch` (PyTorch 2.1+)
+- `opencv-python` (image processing)
+- `matplotlib` (visualization)
+- `smplx` (SMPL body models)
+- `numpy`, `scipy`
+
+## Models Used
+
+- **HMR (multiHMR_672_L.pt)**: ViT-L backbone for pose/shape estimation
+- **SMPL v1.1.0**: Male/Female body templates with 6,890 vertices
+
+## System Architecture
+
+```
+Image Input
+    ↓
+[HMR Inference] → Pose + Shape Parameters
+    ↓
+[SMPL Body Model] → 3D Mesh (6,890 vertices)
+    ↓
+┌───────────────────────────────────────┐
+│  3 Parallel Output Streams:           │
+├───────────────────────────────────────┤
+│ 1. Measurements (text)                │
+│ 2. DensePose (24-part segmentation)   │
+│ 3. 3D Mesh (OBJ + visualization)      │
+└───────────────────────────────────────┘
+```
+
+## Troubleshooting
+
+### "Models not found"
+Ensure `models/` folder contains:
+- `multiHMR_672_L.pt` (1.2GB)
+- `smpl_models/basicmodel_m_lbs_10_207_0_v1.1.0.pkl`
+- `smpl_models/basicmodel_f_lbs_10_207_0_v1.1.0.pkl`
+
+### GPU Out of Memory
+Use `--device cpu` or reduce batch size
+
+### Slow inference
+First run loads models (slow). Subsequent runs are cached and faster.
+
+## Example Commands
 
 ```bash
-python scripts/run_part_c_demo.py \
-	--user samples/user.jpg \
-	--garment samples/garment.png \
-	--out outputs/part_c_demo.jpg \
-	--scale 1.0 \
-	--y-offset 0 \
-	--hmr-json samples/hmr_landmarks.json
+# Process a single image
+python smpl_process_image_lite.py path/to/image.jpg
+
+# Batch process with CPU
+for img in test_images/*.jpg; do
+  python smpl_process_image_lite.py "$img" --device cpu
+done
+
+# Generate all outputs for one image
+ls test_images/full_body.jpg | while read img; do
+  python smpl_process_image_lite.py "$img"
+  python generate_densepose_iuv.py "$img"
+  python generate_3d_mesh.py "$img"
+done
 ```
 
-## Integration contract
+## Output Location
 
-Input:
-- user image
-- garment image (prefer PNG with transparent background)
-- optional controls: `scale_adjust`, `y_offset`
-
-Output:
-- `mode`: `mesh_warp`, `anchored_overlay` (fallback), or `fallback_preview`
-- `confidence`: 0 to 1
-- `warnings`: list of non-blocking issues
-- `output_path`: generated image path
+All outputs saved to `output/` directory with naming:
+- `annotated_<image_name>.*`
+- `measurements_<image_name>.*`
+- `densepose_iuv_<image_name>.*`
+- `mesh_3d_<image_name>.*`
